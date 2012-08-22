@@ -4,6 +4,7 @@ module Network.Aliyun.Utils where
 import qualified Prelude
 import BasicPrelude
 
+import Data.Ord (comparing)
 import qualified Data.ByteString as B
 import qualified Data.CaseInsensitive as CI
 import qualified Data.ByteString.Char8 as S
@@ -22,8 +23,8 @@ canonicalizeHeaders hds =
         merge [] = error "impossible [canonicalizeHeaders]"
         merge xs@((name, _):_) = (name, S.concat . intersperse "," $ map snd xs)
 
-        hds'' = map merge . group . sortWith fst $ hds'
-    in  S.concat . intersperse "\n" $ [S.concat [CI.foldedCase k, "=", v] | (k,v) <- hds'']
+        hds'' = map merge . group . sortBy (comparing fst) $ hds'
+    in  S.concat [S.concat [CI.foldedCase k, ":", v, "\n"] | (k,v) <- hds'']
 
 authorizeRequest :: Request m -> ByteString -> ByteString -> Request m
 authorizeRequest req identity key =
