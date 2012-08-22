@@ -1,4 +1,9 @@
-{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, StandaloneDeriving, MultiParamTypeClasses, RecordWildCards, TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings
+           , GeneralizedNewtypeDeriving
+           , MultiParamTypeClasses
+           , RecordWildCards
+           , TypeFamilies
+           #-}
 module Network.Aliyun where
 
 import qualified Prelude
@@ -110,7 +115,7 @@ deleteBucket name =
                       }
 
 putObject :: ByteString -> ByteString -> RequestBody Yun -> Yun LByteString
-putObject bucket name body = do
+putObject bucket name body =
     responseBody <$>
         lbsRequest def{ hMethod = "PUT"
                       , hPath   = S.concat ["/", bucket, "/", name]
