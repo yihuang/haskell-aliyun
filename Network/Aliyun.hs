@@ -11,11 +11,16 @@ import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Control
 --import Control.Monad.Base.Control
 import Control.Monad.Base
+import qualified Control.Exception.Lifted as Lifted
+import qualified Blaze.ByteString.Builder as B
 
 import Data.Default (Default(def))
 import Data.Time (getCurrentTime, formatTime)
 import qualified Data.Conduit as C
+import qualified Data.Conduit.Binary as C
+import qualified Data.Conduit.List as C
 
+import qualified System.IO as IO
 import System.Locale (defaultTimeLocale)
 import Network.HTTP.Conduit
 import qualified Network.HTTP.Types as W
@@ -55,45 +60,74 @@ data RequestHints = RequestHints
   { hMethod  :: ByteString
   , hPath    :: ByteString
   , hHeaders :: W.RequestHeaders
+  , hBody    :: RequestBody Yun
   }
 
 instance Default RequestHints where
-    def = RequestHints "GET" "/" []
+    def = RequestHints "GET" "/" [] (RequestBodyLBS empty)
 
-simpleRequest :: RequestHints -> Yun LByteString
-simpleRequest RequestHints{..} = do
+lbsRequest :: RequestHints -> Yun (Response LByteString)
+lbsRequest RequestHints{..} = do
     conf <- askConf
     time <- liftIO formatNow
     let req = def { host            = yunHost conf
                   , method          = hMethod
                   , path            = hPath
                   , requestHeaders  = ("Date", time) : hHeaders
+                  , requestBody     = hBody
                   }
         req' = authorizeRequest req (yunId conf) (yunKey conf)
-    responseBody <$> (askManager >>= httpLbs req')
+    askManager >>= httpLbs req'
 
 listService :: Yun LByteString
 listService =
-    simpleRequest def
+    responseBody <$> lbsRequest def
 
 putBucket :: ByteString -> Maybe ByteString -> Yun LByteString
 putBucket name macl = do
     let hds = maybe [] (\acl -> [("x-oss-acl", acl)]) macl
-    simpleRequest def{ hMethod  = "PUT"
-                     , hPath    = "/"++name
-                     , hHeaders = hds
-                     }
+    responseBody <$>
+        lbsRequest def{ hMethod  = "PUT"
+                      , hPath    = "/"++name
+                      , hHeaders = hds
+                      }
 
 getBucket :: ByteString -> Yun LByteString
 getBucket name =
-    simpleRequest def{ hPath = "/"++name }
+    responseBody <$>
+        lbsRequest def{ hPath = "/"++name }
 
 getBucketACL :: ByteString -> Yun LByteString
 getBucketACL name =
-    simpleRequest def{ hPath = "/"++name++"?acl" }
+    responseBody <$>
+        lbsRequest def{ hPath = S.concat ["/", name, "?acl"] }
 
 deleteBucket :: ByteString -> Yun LByteString
 deleteBucket name =
-    simpleRequest def{ hMethod = "DELETE"
-                     , hPath   = "/"++name
-                     }
+    responseBody <$>
+        lbsRequest def{ hMethod = "DELETE"
+                      , hPath   = "/"++name
+                      }
+
+putObject :: ByteString -> ByteString -> RequestBody Yun -> Yun LByteString
+putObject bucket name body = do
+    responseBody <$>
+        lbsRequest def{ hMethod = "PUT"
+                      , hPath   = S.concat ["/", bucket, "/", name]
+                      , hBody   = body
+                      }
+
+putObjectStr :: ByteString -> ByteString -> LByteString -> Yun LByteString
+putObjectStr bucket name body = putObject bucket name (RequestBodyLBS body)
+
+putObjectFile :: ByteString -> ByteString -> IO.FilePath -> Yun LByteString
+putObjectFile bucket name path =
+    Lifted.bracket
+        (liftIO $ IO.openBinaryFile path IO.ReadMode)
+        (liftIO . IO.hClose)
+        (\h -> do
+           size <- fromIntegral <$> liftIO (IO.hTell h)
+           let src  = C.sourceHandle h C.$= C.map B.fromByteString
+               body = RequestBodySource size src
+           putObject bucket name body
+        )

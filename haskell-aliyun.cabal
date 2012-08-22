@@ -53,4 +53,4 @@ library
   -- other-modules:       
   
   -- Other library packages from which modules are imported.
-  build-depends:       base >=4, bytestring >=0.9, conduit >=0.5, http-conduit >=1.5, http-types >=0.7, transformers >=0.2, monad-control >=0.3, transformers-base >=0.4, time >=1.4, old-locale >=1.0, Crypto >=4.2, data-default >=0.5, resourcet >=0.3, basic-prelude >=0.2, base64-bytestring >=0.1, case-insensitive >=0.4
+  build-depends:       base >=4, bytestring >=0.9, conduit >=0.5, http-conduit >=1.5, http-types >=0.7, transformers >=0.2, monad-control >=0.3, transformers-base >=0.4, time >=1.4, old-locale >=1.0, Crypto >=4.2, data-default >=0.5, resourcet >=0.3, basic-prelude >=0.2, base64-bytestring >=0.1, case-insensitive >=0.4, blaze-builder >= 0.3, lifted-base >= 0.1
