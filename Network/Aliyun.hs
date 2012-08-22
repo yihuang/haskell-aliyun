@@ -73,4 +73,27 @@ simpleRequest RequestHints{..} = do
     responseBody <$> (askManager >>= httpLbs req')
 
 listService :: Yun LByteString
-listService = simpleRequest def
+listService =
+    simpleRequest def
+
+putBucket :: ByteString -> Maybe ByteString -> Yun LByteString
+putBucket name macl = do
+    let hds = maybe [] (\acl -> [("x-oss-acl", acl)]) macl
+    simpleRequest def{ hMethod  = "PUT"
+                     , hPath    = "/"++name
+                     , hHeaders = hds
+                     }
+
+getBucket :: ByteString -> Yun LByteString
+getBucket name =
+    simpleRequest def{ hPath = "/"++name }
+
+getBucketACL :: ByteString -> Yun LByteString
+getBucketACL name =
+    simpleRequest def{ hPath = "/"++name++"?acl" }
+
+deleteBucket :: ByteString -> Yun LByteString
+deleteBucket name =
+    simpleRequest def{ hMethod = "DELETE"
+                     , hPath   = "/"++name
+                     }
