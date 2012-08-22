@@ -3,6 +3,7 @@
            , MultiParamTypeClasses
            , RecordWildCards
            , TypeFamilies
+           , TupleSections
            #-}
 module Network.Aliyun where
 
@@ -14,11 +15,11 @@ import qualified Data.ByteString.Char8 as S
 import Control.Monad.Trans.Resource (ResourceT)
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Control
---import Control.Monad.Base.Control
 import Control.Monad.Base
 import qualified Control.Exception.Lifted as Lifted
 import qualified Blaze.ByteString.Builder as B
 
+import Data.Maybe (maybeToList)
 import Data.Default (Default(def))
 import Data.Time (getCurrentTime, formatTime)
 import qualified Data.Conduit as C
@@ -90,7 +91,7 @@ listService =
 
 putBucket :: ByteString -> Maybe ByteString -> Yun LByteString
 putBucket name macl = do
-    let hds = maybe [] (\acl -> [("x-oss-acl", acl)]) macl
+    let hds = maybeToList $ ("x-oss-acl",) <$> macl
     responseBody <$>
         lbsRequest def{ hMethod  = "PUT"
                       , hPath    = "/"++name
@@ -131,8 +132,41 @@ putObjectFile bucket name path =
         (liftIO $ IO.openBinaryFile path IO.ReadMode)
         (liftIO . IO.hClose)
         (\h -> do
-           size <- fromIntegral <$> liftIO (IO.hTell h)
+           size <- fromIntegral <$> liftIO (IO.hFileSize h)
            let src  = C.sourceHandle h C.$= C.map B.fromByteString
                body = RequestBodySource size src
            putObject bucket name body
         )
+
+getObject :: ByteString -> ByteString -> Yun LByteString
+getObject bucket name = getObjectRange bucket name Nothing
+
+getObjectRange :: ByteString -> ByteString -> Maybe ByteString -> Yun LByteString
+getObjectRange bucket name mrange = do
+    let hds = maybeToList $ ("Range",) . ("bytes="++) <$> mrange
+    responseBody <$>
+        lbsRequest def{ hPath    = S.concat ["/", bucket, "/", name]
+                      , hHeaders = hds
+                      }
+
+copyObject :: ByteString -> ByteString -> ByteString -> Yun LByteString
+copyObject bucket name source =
+    responseBody <$>
+        lbsRequest def{ hMethod  = "PUT"
+                      , hPath    = S.concat ["/", bucket, "/", name]
+                      , hHeaders = [("x-oss-copy-source", source)]
+                      }
+
+headObject :: ByteString -> ByteString -> Yun LByteString
+headObject bucket name =
+    responseBody <$>
+        lbsRequest def{ hMethod = "HEAD"
+                      , hPath   = S.concat ["/", bucket, "/", name]
+                      }
+
+deleteObject :: ByteString -> ByteString -> Yun LByteString
+deleteObject bucket name =
+    responseBody <$>
+        lbsRequest def{ hMethod = "DELETE"
+                      , hPath   = S.concat ["/", bucket, "/", name]
+                      }
