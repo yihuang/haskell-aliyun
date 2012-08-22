@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, StandaloneDeriving, MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, StandaloneDeriving, MultiParamTypeClasses, RecordWildCards, TypeFamilies #-}
 module Network.Aliyun where
 
 import qualified Prelude
@@ -12,12 +12,13 @@ import Control.Monad.Trans.Control
 --import Control.Monad.Base.Control
 import Control.Monad.Base
 
-import Data.Default (def)
+import Data.Default (Default(def))
 import Data.Time (getCurrentTime, formatTime)
 import qualified Data.Conduit as C
 
 import System.Locale (defaultTimeLocale)
 import Network.HTTP.Conduit
+import qualified Network.HTTP.Types as W
 
 import Network.Aliyun.Utils
 
@@ -27,37 +28,49 @@ data YunConf = YunConf
   , yunKey  :: ByteString
   }
 
-type YunEnv = YunConf
+type YunEnv = (YunConf, Manager)
 
-newtype Yun a = Yun { unYun :: ReaderT YunEnv IO a }
-    deriving ( Functor, Applicative, Monad, MonadIO
-             )
+newtype Yun a = Yun { unYun :: ReaderT YunEnv (ResourceT IO) a }
+    deriving (Functor, Applicative, Monad, MonadIO, C.MonadResource, C.MonadThrow, C.MonadUnsafeIO)
 
 instance MonadBase IO Yun where
-    liftBase = liftIO
+    liftBase = Yun . liftBase
 
-askConf = Yun ask
-asksConf f = f <$> askConf
+instance MonadBaseControl IO Yun where
+    newtype StM Yun a = YunStM { unYunStM :: StM (ReaderT YunEnv (ResourceT IO)) a }
+    liftBaseWith f = Yun . liftBaseWith $ \runInBase -> f $ liftM YunStM . runInBase . unYun
+    restoreM = Yun . restoreM . unYunStM
+
+askConf     = fst <$> Yun ask
+askManager  = snd <$> Yun ask
+asksConf f  = f <$> askConf
 
 runYun :: YunConf -> Yun a -> IO a
-runYun conf yun = runReaderT (unYun yun) conf
+runYun conf yun = withManager $ \man -> runReaderT (unYun yun) (conf, man)
 
 formatNow :: IO ByteString
 formatNow = S.pack . formatTime defaultTimeLocale "%a, %d %b %Y %H:%M:%S GMT" <$> getCurrentTime
 
-getRequest :: ByteString -> Yun (Request m)
-getRequest path = do
+data RequestHints = RequestHints
+  { hMethod  :: ByteString
+  , hPath    :: ByteString
+  , hHeaders :: W.RequestHeaders
+  }
+
+instance Default RequestHints where
+    def = RequestHints "GET" "/" []
+
+simpleRequest :: RequestHints -> Yun LByteString
+simpleRequest RequestHints{..} = do
     conf <- askConf
     time <- liftIO formatNow
-    let req = def { host = yunHost conf
-                  , method = "GET"
-                  , path = path
-                  , requestHeaders = [("Date", time)]
+    let req = def { host            = yunHost conf
+                  , method          = hMethod
+                  , path            = hPath
+                  , requestHeaders  = ("Date", time) : hHeaders
                   }
-    return $ authorizeRequest req (yunId conf) (yunKey conf)
+        req' = authorizeRequest req (yunId conf) (yunKey conf)
+    responseBody <$> (askManager >>= httpLbs req')
 
 listService :: Yun LByteString
-listService = do
-    req  <- getRequest "/"
-    liftIO $ withManager $ \man ->
-        responseBody <$> httpLbs req man
+listService = simpleRequest def
