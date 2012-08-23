@@ -4,6 +4,9 @@ import BasicPrelude
 import Network.Aliyun
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.Lazy.Char8 as L
+import qualified Blaze.ByteString.Builder as B
+import qualified Data.Conduit as C
+import qualified Data.Conduit.List as C
 
 {-
  - Before run test.hs, create a file named "config" in current directory,
@@ -22,6 +25,9 @@ main :: IO ()
 main = do
     conf <- loadConf "./config"
     runYun conf $ do
+        --liftIO $ putStrLn "put stream object test4"
+        --p $ putObjectStream "yihuang_bucket" "test4" (C.sourceList ["hello", "world"] C.$= C.map B.fromByteString)
+
         liftIO $ putStrLn "list service"
         p listService
         liftIO $ putStrLn "put bucket"
@@ -54,3 +60,5 @@ main = do
         p $ headObject "yihuang_bucket" "test3"
         liftIO $ putStrLn "delete object test3"
         p $ deleteObject "yihuang_bucket" "test3"
+        liftIO $ putStrLn "delete multiple objects test1 test2"
+        p $ deleteObjects "yihuang_bucket" ["test1", "test2"] True

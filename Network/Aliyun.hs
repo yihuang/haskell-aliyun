@@ -11,6 +11,7 @@ import qualified Prelude
 import BasicPrelude
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as S
+import qualified Data.ByteString.Lazy as L
 
 import Control.Monad.Trans.Resource (ResourceT)
 import Control.Monad.Trans.Reader
@@ -67,10 +68,11 @@ data RequestHints = RequestHints
   , hPath    :: ByteString
   , hHeaders :: W.RequestHeaders
   , hBody    :: RequestBody Yun
+  , hNeedMd5 :: Bool
   }
 
 instance Default RequestHints where
-    def = RequestHints "GET" "/" [] (RequestBodyLBS empty)
+    def = RequestHints "GET" "/" [] (RequestBodyLBS empty) False
 
 lbsRequest :: RequestHints -> Yun (Response LByteString)
 lbsRequest RequestHints{..} = do
@@ -82,7 +84,7 @@ lbsRequest RequestHints{..} = do
                   , requestHeaders  = ("Date", time) : hHeaders
                   , requestBody     = hBody
                   }
-        req' = authorizeRequest req (yunId conf) (yunKey conf)
+        req' = authorizeRequest req (yunId conf) (yunKey conf) hNeedMd5
     askManager >>= httpLbs req'
 
 listService :: Yun LByteString
@@ -138,6 +140,13 @@ putObjectFile bucket name path =
            putObject bucket name body
         )
 
+-- this is invalid: aliyun don't support chunked tranfer-encoding.
+putObjectStream :: ByteString -> ByteString -> C.Source Yun B.Builder -> Yun LByteString
+putObjectStream bucket name source =
+    putObject bucket name (RequestBodySourceChunked source)
+
+-- TODO put object multipart
+
 getObject :: ByteString -> ByteString -> Yun LByteString
 getObject bucket name = getObjectRange bucket name Nothing
 
@@ -169,4 +178,20 @@ deleteObject bucket name =
     responseBody <$>
         lbsRequest def{ hMethod = "DELETE"
                       , hPath   = S.concat ["/", bucket, "/", name]
+                      }
+
+deleteObjects :: ByteString -> [ByteString] -> Bool -> Yun LByteString
+deleteObjects bucket names verbose = do
+    let body = L.fromChunks $
+          [ "<Delete><Quiet>"
+          , if verbose then "false" else "true"
+          , "</Quiet>"
+          ] ++
+          concat [["<Object><Key>", name, "</Key></Object>"] | name <- names] ++
+          [ "</Delete>" ]
+    responseBody <$>
+        lbsRequest def{ hMethod  = "POST"
+                      , hPath    = S.concat ["/", bucket, "?delete"]
+                      , hBody    = RequestBodyLBS body
+                      , hNeedMd5 = True
                       }
