@@ -5,7 +5,30 @@
            , TypeFamilies
            , TupleSections
            #-}
-module Network.Aliyun where
+module Network.Aliyun
+  ( Yun(..)
+  , YunConf(..)
+  , YunEnv
+  , BucketQuery(..)
+  , runYun
+  , listService
+  , putBucket
+  , getBucket
+  , getBucketContents
+  , getBucketACL
+  , deleteBucket
+  , putObject
+  , putObjectStr
+  , putObjectStream
+  , putObjectFile
+  , getObject
+  , getObjectRange
+  , copyObject
+  , headObject
+  , deleteObject
+  , deleteObjects
+  , module Network.Aliyun.Types
+  ) where
 
 import qualified Prelude as P
 import BasicPrelude
@@ -116,10 +139,10 @@ data BucketQuery = BucketQuery
   { qryPrefix       :: Text
   , qryMaxKeys      :: Int
   , qryMarker       :: Maybe Text
-  , qryDelimiter    :: Char
+  , qryDelimiter    :: Maybe Char
   }
 instance Default BucketQuery where
-    def = BucketQuery "" 1000 Nothing '/'
+    def = BucketQuery "" 1000 Nothing Nothing
 
 getBucket :: ByteString -> BucketQuery -> Yun Bucket
 getBucket name qry =
@@ -129,7 +152,7 @@ getBucket name qry =
            [ "prefix=", qryPrefix qry
            , "&max-keys=", show (qryMaxKeys qry)
            , maybe "" ("&marker="++) (qryMarker qry)
-           , "&delimiter="++T.singleton (qryDelimiter qry)
+           , maybe "" (("&delimiter="++) . T.singleton) (qryDelimiter qry)
            ]
 
 getBucketContents :: ByteString -> BucketQuery -> C.Source Yun BucketContent
@@ -137,7 +160,8 @@ getBucketContents name query = loop query
   where
     loop qry = do
         bucket <- lift (getBucket name qry)
-        mapM_ C.yield (bucketContents bucket)
+        mapM_ (C.yield . ContentDirectory) (bucketDirectories bucket)
+        mapM_ (C.yield . ContentFile) (bucketContents bucket)
         when (bucketIsTruncated bucket) $
             loop qry{qryMarker=bucketNextMarker bucket}
 

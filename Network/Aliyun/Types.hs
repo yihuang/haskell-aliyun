@@ -2,8 +2,9 @@
 module Network.Aliyun.Types
   ( Owner(..)
   , BucketList(..)
-  , BucketContent(..)
+  , BucketFile(..)
   , Bucket(..)
+  , BucketContent(..)
   , BucketACL(..)
   , DeleteResult(..)
   , CopyResult(..)
@@ -77,7 +78,7 @@ instance FromJSON BucketList where
         pBucket a = typeMismatch "Object [BucketList.bucketList[i]]" a
     parseJSON a = typeMismatch "BucketList" a
 
-data BucketContent = BucketContent
+data BucketFile = BucketFile
   { contentKey          :: !Text
   , contentLastModified :: !UTCTime
   , contentETag         :: !Text
@@ -87,15 +88,15 @@ data BucketContent = BucketContent
   , contentOwner        :: !Owner
   } deriving (Show)
 
-instance FromJSON BucketContent where
+instance FromJSON BucketFile where
     parseJSON (Object o) =
-        BucketContent <$> o .: "Key"
-                      <*> (pTime <$> o .: "LastModified")
-                      <*> o .: "ETag"
-                      <*> o .: "Type"
-                      <*> (o .: "Size" >>= strRead (readMay . T.unpack))
-                      <*> o .: "StorageClass"
-                      <*> o .: "Owner"
+        BucketFile <$> o .: "Key"
+                   <*> (pTime <$> o .: "LastModified")
+                   <*> o .: "ETag"
+                   <*> o .: "Type"
+                   <*> (o .: "Size" >>= strRead (readMay . T.unpack))
+                   <*> o .: "StorageClass"
+                   <*> o .: "Owner"
     parseJSON a = typeMismatch "Object" a
 
 data Bucket = Bucket
@@ -106,12 +107,14 @@ data Bucket = Bucket
   , bucketDelimiter     :: !Text
   , bucketIsTruncated   :: !Bool
   , bucketNextMarker    :: Maybe Text
-  , bucketContents      :: ![BucketContent]
+  , bucketContents      :: ![BucketFile]
+  , bucketDirectories   :: ![Text]
   } deriving (Show)
 
 instance FromJSON Bucket where
     parseJSON (Object o) = do
         r <- o .: "ListBucketResult"
+        let getCommonPrefixes = r .: "CommonPrefixes" >>= (.: "Prefix")
         Bucket <$> r .: "Name"
                <*> r .: "Prefix"
                <*> r .: "Marker"
@@ -122,7 +125,14 @@ instance FromJSON Bucket where
                <*> ( (r .: "Contents" >>= pList parseJSON)
                      <|> pure []
                    )
+               <*> ( (getCommonPrefixes >>= pList parseJSON)
+                     <|> pure []
+                   )
     parseJSON a = typeMismatch "Object" a
+
+data BucketContent = ContentFile      !BucketFile
+                   | ContentDirectory !Text
+  deriving (Show)
 
 data BucketACL = BucketACL
   { bucketACLOwner  :: !Owner
