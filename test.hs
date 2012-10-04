@@ -2,9 +2,9 @@
 import qualified Prelude
 import BasicPrelude
 import Network.Aliyun
+import Data.Default (def)
 import qualified Data.Text.Encoding as T
-import qualified Data.ByteString.Lazy.Char8 as L
-import qualified Blaze.ByteString.Builder as B
+import Data.ByteString.Lazy.Char8 ()
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 
@@ -18,8 +18,8 @@ loadConf path = do
     (ident : key : _) <- lines <$> readFile path
     return $ YunConf "storage.aliyun.com" (T.encodeUtf8 ident) (T.encodeUtf8 key)
 
-p :: MonadIO m => m LByteString -> m ()
-p m = m >>= liftIO . L.putStrLn
+p :: (MonadIO m, Show a) => m a -> m ()
+p m = m >>= liftIO . putStrLn . show
 
 main :: IO ()
 main = do
@@ -35,7 +35,7 @@ main = do
         liftIO $ putStrLn "list service"
         p listService
         liftIO $ putStrLn "get bucket"
-        p $ getBucket "yihuang_bucket"
+        p $ getBucket "yihuang_bucket" def
         liftIO $ putStrLn "get bucket acl"
         p $ getBucketACL "yihuang_bucket"
         liftIO $ putStrLn "put bucket acl"
@@ -47,7 +47,9 @@ main = do
         liftIO $ putStrLn "put file object test2"
         p $ putObjectFile "yihuang_bucket" "test2" "./data"
         liftIO $ putStrLn "get bucket"
-        p $ getBucket "yihuang_bucket"
+        p $ getBucket "yihuang_bucket" def
+        p $ getBucket "yihuang_bucket" def{qryMaxKeys=1}
+        p $ getBucketContents "yihuang_bucket" def{qryMaxKeys=1} C.$$ C.consume
         liftIO $ putStrLn "get object test1"
         p $ getObject "yihuang_bucket" "test1"
         liftIO $ putStrLn "get object test2"

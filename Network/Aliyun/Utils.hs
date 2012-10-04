@@ -4,7 +4,6 @@ module Network.Aliyun.Utils where
 import qualified Prelude
 import BasicPrelude
 
-import Data.Ord (comparing)
 import qualified Data.ByteString as B
 import qualified Data.CaseInsensitive as CI
 import qualified Data.ByteString.Char8 as S

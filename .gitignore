@@ -1,5 +1,6 @@
 *.hi
 *.o
+*.swp
 /tags
 /dist
 /config

@@ -7,11 +7,12 @@
            #-}
 module Network.Aliyun where
 
-import qualified Prelude
+import qualified Prelude as P
 import BasicPrelude
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy as L
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 
 import Control.Monad.Trans.Resource (ResourceT)
 import Control.Monad.Trans.Reader
@@ -21,17 +22,20 @@ import qualified Control.Exception.Lifted as Lifted
 import qualified Blaze.ByteString.Builder as B
 
 import Data.Maybe (maybeToList)
-import Data.Default (Default(def))
+import Data.Default (Default)
 import Data.Time (getCurrentTime, formatTime)
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Binary as C
 import qualified Data.Conduit.List as C
+import Data.Aeson (FromJSON)
+import Text.XML.ToJSON (parseXML)
 
 import qualified System.IO as IO
 import System.Locale (defaultTimeLocale)
 import Network.HTTP.Conduit
 import qualified Network.HTTP.Types as W
 
+import Network.Aliyun.Types
 import Network.Aliyun.Utils
 
 data YunConf = YunConf
@@ -53,8 +57,11 @@ instance MonadBaseControl IO Yun where
     liftBaseWith f = Yun . liftBaseWith $ \runInBase -> f $ liftM YunStM . runInBase . unYun
     restoreM = Yun . restoreM . unYunStM
 
+askConf :: Yun YunConf
 askConf     = fst <$> Yun ask
+askManager :: Yun Manager
 askManager  = snd <$> Yun ask
+asksConf :: (YunConf -> a) -> Yun a
 asksConf f  = f <$> askConf
 
 runYun :: YunConf -> Yun a -> IO a
@@ -66,13 +73,14 @@ formatNow = S.pack . formatTime defaultTimeLocale "%a, %d %b %Y %H:%M:%S GMT" <$
 data RequestHints = RequestHints
   { hMethod  :: ByteString
   , hPath    :: ByteString
+  , hQuery   :: ByteString
   , hHeaders :: W.RequestHeaders
   , hBody    :: RequestBody Yun
   , hNeedMd5 :: Bool
   }
 
 instance Default RequestHints where
-    def = RequestHints "GET" "/" [] (RequestBodyLBS empty) False
+    def = RequestHints "GET" "/" "" [] (RequestBodyLBS empty) False
 
 lbsRequest :: RequestHints -> Yun (Response LByteString)
 lbsRequest RequestHints{..} = do
@@ -81,15 +89,19 @@ lbsRequest RequestHints{..} = do
     let req = def { host            = yunHost conf
                   , method          = hMethod
                   , path            = hPath
+                  , queryString     = hQuery
                   , requestHeaders  = ("Date", time) : hHeaders
                   , requestBody     = hBody
                   }
         req' = authorizeRequest req (yunId conf) (yunKey conf) hNeedMd5
     askManager >>= httpLbs req'
 
-listService :: Yun LByteString
+xmlResponse :: (C.MonadThrow m, FromJSON a) => Response LByteString -> m a
+xmlResponse = parseXML . responseBody
+
+listService :: Yun BucketList
 listService =
-    responseBody <$> lbsRequest def
+    xmlResponse =<< lbsRequest def
 
 putBucket :: ByteString -> Maybe ByteString -> Yun LByteString
 putBucket name macl = do
@@ -100,15 +112,38 @@ putBucket name macl = do
                       , hHeaders = hds
                       }
 
-getBucket :: ByteString -> Yun LByteString
-getBucket name =
-    responseBody <$>
-        lbsRequest def{ hPath = "/"++name }
+data BucketQuery = BucketQuery
+  { qryPrefix       :: Text
+  , qryMaxKeys      :: Int
+  , qryMarker       :: Maybe Text
+  , qryDelimiter    :: Char
+  }
+instance Default BucketQuery where
+    def = BucketQuery "" 1000 Nothing '/'
 
-getBucketACL :: ByteString -> Yun LByteString
+getBucket :: ByteString -> BucketQuery -> Yun Bucket
+getBucket name qry =
+    xmlResponse =<< lbsRequest def{ hPath = "/"++name, hQuery=qs }
+  where
+    qs = T.encodeUtf8 $ T.concat
+           [ "prefix=", qryPrefix qry
+           , "&max-keys=", show (qryMaxKeys qry)
+           , maybe "" ("&marker="++) (qryMarker qry)
+           , "&delimiter="++T.singleton (qryDelimiter qry)
+           ]
+
+getBucketContents :: ByteString -> BucketQuery -> C.Source Yun BucketContent
+getBucketContents name query = loop query
+  where
+    loop qry = do
+        bucket <- lift (getBucket name qry)
+        mapM_ C.yield (bucketContents bucket)
+        when (bucketIsTruncated bucket) $
+            loop qry{qryMarker=bucketNextMarker bucket}
+
+getBucketACL :: ByteString -> Yun BucketACL
 getBucketACL name =
-    responseBody <$>
-        lbsRequest def{ hPath = S.concat ["/", name, "?acl"] }
+    xmlResponse =<< lbsRequest def{ hPath = S.concat ["/", name, "?acl"] }
 
 deleteBucket :: ByteString -> Yun LByteString
 deleteBucket name =
@@ -158,9 +193,9 @@ getObjectRange bucket name mrange = do
                       , hHeaders = hds
                       }
 
-copyObject :: ByteString -> ByteString -> ByteString -> Yun LByteString
+copyObject :: ByteString -> ByteString -> ByteString -> Yun CopyResult
 copyObject bucket name source =
-    responseBody <$>
+    xmlResponse =<<
         lbsRequest def{ hMethod  = "PUT"
                       , hPath    = S.concat ["/", bucket, "/", name]
                       , hHeaders = [("x-oss-copy-source", source)]
@@ -180,7 +215,7 @@ deleteObject bucket name =
                       , hPath   = S.concat ["/", bucket, "/", name]
                       }
 
-deleteObjects :: ByteString -> [ByteString] -> Bool -> Yun LByteString
+deleteObjects :: ByteString -> [ByteString] -> Bool -> Yun DeleteResult
 deleteObjects bucket names verbose = do
     let body = L.fromChunks $
           [ "<Delete><Quiet>"
@@ -189,7 +224,7 @@ deleteObjects bucket names verbose = do
           ] ++
           concat [["<Object><Key>", name, "</Key></Object>"] | name <- names] ++
           [ "</Delete>" ]
-    responseBody <$>
+    xmlResponse =<<
         lbsRequest def{ hMethod  = "POST"
                       , hPath    = S.concat ["/", bucket, "?delete"]
                       , hBody    = RequestBodyLBS body
