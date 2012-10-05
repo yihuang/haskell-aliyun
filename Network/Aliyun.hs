@@ -6,6 +6,7 @@
            , TupleSections
            , FlexibleContexts
            , Rank2Types
+           , ViewPatterns
            #-}
 module Network.Aliyun
   ( Yun(..)
@@ -36,10 +37,13 @@ module Network.Aliyun
 
 import qualified Prelude as P
 import BasicPrelude
+import qualified Filesystem.Path as Path
+import qualified Filesystem.Path.CurrentOS as Path
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import Data.Time.Clock (UTCTime(UTCTime))
 
 import Control.Monad.Trans.Resource (ResourceT)
 import Control.Monad.Trans.Reader
@@ -162,17 +166,27 @@ getBucket name qry =
            , maybe "" (("&delimiter="++) . T.singleton) (qryDelimiter qry)
            ]
 
-getBucketContentsLifted :: Monad m => (forall a. Yun a -> m a) -> ByteString -> BucketQuery -> C.Source m BucketContent
-getBucketContentsLifted liftYun name query = loop query
+getBucketContentsLifted :: Monad m => (forall a. Yun a -> m a) -> ByteString -> Text -> C.Source m BucketContent
+getBucketContentsLifted liftYun name prefix = loop def{qryDelimiter=Just '/', qryPrefix=prefix}
   where
+    withFilePath f = either id id . Path.toText . f . Path.fromText
+
     loop qry = do
         bucket <- lift $ liftYun $ getBucket name qry
-        mapM_ (C.yield . ContentDirectory) (bucketDirectories bucket)
-        mapM_ (C.yield . ContentFile) (bucketContents bucket)
+        mapM_ ( C.yield
+              . flip ContentDirectory (UTCTime (toEnum 60000) 0)
+              . withFilePath Path.dirname
+              )
+              (bucketDirectories bucket)
+        mapM_ ( C.yield
+              . ContentFile
+              . (\f -> f{fileKey = withFilePath Path.filename (fileKey f)})
+              )
+              (bucketContents bucket)
         when (bucketIsTruncated bucket) $
             loop qry{qryMarker=bucketNextMarker bucket}
 
-getBucketContents :: ByteString -> BucketQuery -> C.Source Yun BucketContent
+getBucketContents :: ByteString -> Text -> C.Source Yun BucketContent
 getBucketContents = getBucketContentsLifted id
 
 getBucketACL :: ByteString -> Yun BucketACL

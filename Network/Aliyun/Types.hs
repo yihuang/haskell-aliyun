@@ -131,7 +131,7 @@ instance FromJSON Bucket where
     parseJSON a = typeMismatch "Object" a
 
 data BucketContent = ContentFile      !BucketFile
-                   | ContentDirectory !Text
+                   | ContentDirectory !Text !UTCTime
   deriving (Show)
 
 data BucketACL = BucketACL
