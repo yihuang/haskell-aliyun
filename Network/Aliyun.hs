@@ -6,7 +6,6 @@
            , TupleSections
            , FlexibleContexts
            , Rank2Types
-           , ViewPatterns
            #-}
 module Network.Aliyun
   ( Yun(..)
@@ -41,7 +40,6 @@ import qualified Filesystem.Path as Path
 import qualified Filesystem.Path.CurrentOS as Path
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy as L
-import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Time.Clock (UTCTime(UTCTime))
 
@@ -70,9 +68,9 @@ import Network.Aliyun.Types
 import Network.Aliyun.Utils
 
 data YunConf = YunConf
-  { yunHost :: ByteString
-  , yunId   :: ByteString
-  , yunKey  :: ByteString
+  { yunHost :: !ByteString
+  , yunId   :: !ByteString
+  , yunKey  :: !ByteString
   }
 
 type YunEnv = (YunConf, Manager)
@@ -105,12 +103,12 @@ formatNow :: IO ByteString
 formatNow = S.pack . formatTime defaultTimeLocale "%a, %d %b %Y %H:%M:%S GMT" <$> getCurrentTime
 
 data RequestHints = RequestHints
-  { hMethod  :: ByteString
-  , hPath    :: ByteString
-  , hQuery   :: ByteString
-  , hHeaders :: W.RequestHeaders
-  , hBody    :: RequestBody Yun
-  , hNeedMd5 :: Bool
+  { hMethod  :: !ByteString
+  , hPath    :: !ByteString
+  , hQuery   :: !ByteString
+  , hHeaders :: !W.RequestHeaders
+  , hBody    :: !(RequestBody Yun)
+  , hNeedMd5 :: !Bool
   }
 
 instance Default RequestHints where
@@ -147,10 +145,10 @@ putBucket name macl = do
                       }
 
 data BucketQuery = BucketQuery
-  { qryPrefix       :: Text
-  , qryMaxKeys      :: Int
-  , qryMarker       :: Maybe Text
-  , qryDelimiter    :: Maybe Char
+  { qryPrefix       :: !ByteString
+  , qryMaxKeys      :: !Int
+  , qryMarker       :: !(Maybe Text)
+  , qryDelimiter    :: !(Maybe Char)
   }
 instance Default BucketQuery where
     def = BucketQuery "" 1000 Nothing Nothing
@@ -159,14 +157,14 @@ getBucket :: ByteString -> BucketQuery -> Yun Bucket
 getBucket name qry =
     xmlResponse =<< lbsRequest def{ hPath = "/"++name, hQuery=qs }
   where
-    qs = T.encodeUtf8 $ T.concat
+    qs = S.concat
            [ "prefix=", qryPrefix qry
-           , "&max-keys=", show (qryMaxKeys qry)
-           , maybe "" ("&marker="++) (qryMarker qry)
-           , maybe "" (("&delimiter="++) . T.singleton) (qryDelimiter qry)
+           , "&max-keys=", S.pack $ P.show (qryMaxKeys qry)
+           , maybe "" (("&marker="++) . T.encodeUtf8) (qryMarker qry)
+           , maybe "" (("&delimiter="++) . S.singleton) (qryDelimiter qry)
            ]
 
-getBucketContentsLifted :: Monad m => (forall a. Yun a -> m a) -> ByteString -> Text -> C.Source m BucketContent
+getBucketContentsLifted :: Monad m => (forall a. Yun a -> m a) -> ByteString -> ByteString -> C.Source m BucketContent
 getBucketContentsLifted liftYun name prefix = loop def{qryDelimiter=Just '/', qryPrefix=prefix}
   where
     withFilePath f = either id id . Path.toText . f . Path.fromText
@@ -186,7 +184,7 @@ getBucketContentsLifted liftYun name prefix = loop def{qryDelimiter=Just '/', qr
         when (bucketIsTruncated bucket) $
             loop qry{qryMarker=bucketNextMarker bucket}
 
-getBucketContents :: ByteString -> Text -> C.Source Yun BucketContent
+getBucketContents :: ByteString -> ByteString -> C.Source Yun BucketContent
 getBucketContents = getBucketContentsLifted id
 
 getBucketACL :: ByteString -> Yun BucketACL
