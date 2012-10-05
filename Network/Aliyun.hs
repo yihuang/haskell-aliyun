@@ -5,6 +5,7 @@
            , TypeFamilies
            , TupleSections
            , FlexibleContexts
+           , Rank2Types
            #-}
 module Network.Aliyun
   ( Yun(..)
@@ -17,6 +18,7 @@ module Network.Aliyun
   , putBucket
   , getBucket
   , getBucketContents
+  , getBucketContentsLifted
   , getBucketACL
   , deleteBucket
   , putObject
@@ -160,15 +162,18 @@ getBucket name qry =
            , maybe "" (("&delimiter="++) . T.singleton) (qryDelimiter qry)
            ]
 
-getBucketContents :: MonadBase Yun m => ByteString -> BucketQuery -> C.Source m BucketContent
-getBucketContents name query = loop query
+getBucketContentsLifted :: Monad m => (forall a. Yun a -> m a) -> ByteString -> BucketQuery -> C.Source m BucketContent
+getBucketContentsLifted liftYun name query = loop query
   where
     loop qry = do
-        bucket <- lift $ liftBase $ getBucket name qry
+        bucket <- lift $ liftYun $ getBucket name qry
         mapM_ (C.yield . ContentDirectory) (bucketDirectories bucket)
         mapM_ (C.yield . ContentFile) (bucketContents bucket)
         when (bucketIsTruncated bucket) $
             loop qry{qryMarker=bucketNextMarker bucket}
+
+getBucketContents :: ByteString -> BucketQuery -> C.Source Yun BucketContent
+getBucketContents = getBucketContentsLifted id
 
 getBucketACL :: ByteString -> Yun BucketACL
 getBucketACL name =
