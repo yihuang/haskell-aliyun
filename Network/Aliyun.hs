@@ -12,6 +12,7 @@ module Network.Aliyun
   , YunEnv
   , BucketQuery(..)
   , runYun
+  , runYunWithManager
   , listService
   , putBucket
   , getBucket
