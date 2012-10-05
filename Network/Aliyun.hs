@@ -90,6 +90,9 @@ asksConf f  = f <$> askConf
 runYun :: YunConf -> Yun a -> IO a
 runYun conf yun = withManager $ \man -> runReaderT (unYun yun) (conf, man)
 
+runYunWithManager :: Manager -> YunConf -> Yun a -> ResourceT IO a
+runYunWithManager man conf yun = runReaderT (unYun yun) (conf, man)
+
 formatNow :: IO ByteString
 formatNow = S.pack . formatTime defaultTimeLocale "%a, %d %b %Y %H:%M:%S GMT" <$> getCurrentTime
 
