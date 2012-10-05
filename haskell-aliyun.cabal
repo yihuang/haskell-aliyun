@@ -49,6 +49,8 @@ library
   ghc-options:       -Wall -O2
   -- Modules exported by the library.
   exposed-modules:     Network.Aliyun
+                     , Network.Aliyun.Types
+                     , Network.Aliyun.Utils
   
   -- Modules included in this library but not exported.
   -- other-modules:       
