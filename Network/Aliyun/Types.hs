@@ -79,13 +79,13 @@ instance FromJSON BucketList where
     parseJSON a = typeMismatch "BucketList" a
 
 data BucketFile = BucketFile
-  { contentKey          :: !Text
-  , contentLastModified :: !UTCTime
-  , contentETag         :: !Text
-  , contentType         :: !Text
-  , contentSize         :: !Integer -- to support very large file
-  , contentStorage      :: !Text
-  , contentOwner        :: !Owner
+  { fileKey          :: !Text
+  , fileLastModified :: !UTCTime
+  , fileETag         :: !Text
+  , fileType         :: !Text
+  , fileSize         :: !Integer -- to support very large file
+  , fileStorage      :: !Text
+  , fileOwner        :: !Owner
   } deriving (Show)
 
 instance FromJSON BucketFile where
