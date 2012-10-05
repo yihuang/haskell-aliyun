@@ -4,6 +4,7 @@
            , RecordWildCards
            , TypeFamilies
            , TupleSections
+           , FlexibleContexts
            #-}
 module Network.Aliyun
   ( Yun(..)
@@ -158,11 +159,11 @@ getBucket name qry =
            , maybe "" (("&delimiter="++) . T.singleton) (qryDelimiter qry)
            ]
 
-getBucketContents :: ByteString -> BucketQuery -> C.Source Yun BucketContent
+getBucketContents :: MonadBase Yun m => ByteString -> BucketQuery -> C.Source m BucketContent
 getBucketContents name query = loop query
   where
     loop qry = do
-        bucket <- lift (getBucket name qry)
+        bucket <- lift $ liftBase $ getBucket name qry
         mapM_ (C.yield . ContentDirectory) (bucketDirectories bucket)
         mapM_ (C.yield . ContentFile) (bucketContents bucket)
         when (bucketIsTruncated bucket) $
