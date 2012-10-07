@@ -27,6 +27,8 @@ module Network.Aliyun
   , putObjectFile
   , getObject
   , getObjectRange
+  , getObjectStream
+  , getObjectRangeStream
   , copyObject
   , headObject
   , deleteObject
@@ -114,8 +116,8 @@ data RequestHints = RequestHints
 instance Default RequestHints where
     def = RequestHints "GET" "/" "" [] (RequestBodyLBS empty) False
 
-lbsRequest :: RequestHints -> Yun (Response LByteString)
-lbsRequest RequestHints{..} = do
+mkRequest :: RequestHints -> Yun (Request Yun)
+mkRequest RequestHints{..} = do
     conf <- askConf
     time <- liftIO formatNow
     let req = def { host            = yunHost conf
@@ -125,8 +127,16 @@ lbsRequest RequestHints{..} = do
                   , requestHeaders  = ("Date", time) : hHeaders
                   , requestBody     = hBody
                   }
-        req' = authorizeRequest req (yunId conf) (yunKey conf) hNeedMd5
-    askManager >>= httpLbs req'
+    return $ authorizeRequest req (yunId conf) (yunKey conf) hNeedMd5
+
+streamRequest :: RequestHints -> Yun (Response (C.ResumableSource Yun S.ByteString))
+streamRequest hints = do
+    req <- mkRequest hints
+    askManager >>= http req
+
+lbsRequest :: RequestHints -> Yun (Response LByteString)
+lbsRequest hints =
+    streamRequest hints >>= lbsResponse
 
 xmlResponse :: (C.MonadThrow m, FromJSON a) => Response LByteString -> m a
 xmlResponse = parseXML . responseBody
@@ -171,11 +181,13 @@ getBucketContentsLifted liftYun name prefix = loop def{qryDelimiter=Just '/', qr
 
     loop qry = do
         bucket <- lift $ liftYun $ getBucket name qry
+        -- yield directories
         mapM_ ( C.yield
               . flip ContentDirectory (UTCTime (toEnum 60000) 0)
               . withFilePath Path.dirname
               )
               (bucketDirectories bucket)
+        -- yield files
         mapM_ ( C.yield
               . ContentFile
               . (\f -> f{fileKey = withFilePath Path.filename (fileKey f)})
@@ -206,9 +218,11 @@ putObject bucket name body =
                       , hBody   = body
                       }
 
+-- | Upload a file with `LByteString' content.
 putObjectStr :: ByteString -> ByteString -> LByteString -> Yun LByteString
 putObjectStr bucket name body = putObject bucket name (RequestBodyLBS body)
 
+-- | Upload a file from disk streamlined.
 putObjectFile :: ByteString -> ByteString -> IO.FilePath -> Yun LByteString
 putObjectFile bucket name path =
     Lifted.bracket
@@ -217,25 +231,36 @@ putObjectFile bucket name path =
         (\h -> do
            size <- fromIntegral <$> liftIO (IO.hFileSize h)
            let src  = C.sourceHandle h C.$= C.map B.fromByteString
-               body = RequestBodySource size src
-           putObject bucket name body
+           putObjectStream bucket name size src
         )
 
--- this is invalid: aliyun don't support chunked tranfer-encoding.
-putObjectStream :: ByteString -> ByteString -> C.Source Yun B.Builder -> Yun LByteString
-putObjectStream bucket name source =
-    putObject bucket name (RequestBodySourceChunked source)
+-- | Upload a file from a source streamlined.
+-- aliyun don't support chunked tranfer-encoding, so size must be passed.
+putObjectStream :: ByteString -> ByteString -> Int64 -> C.Source Yun B.Builder -> Yun LByteString
+putObjectStream bucket name size source =
+    putObject bucket name (RequestBodySource size source)
 
 -- TODO put object multipart
 
 getObject :: ByteString -> ByteString -> Yun LByteString
 getObject bucket name = getObjectRange bucket name Nothing
 
+getObjectStream :: ByteString -> ByteString -> Yun (C.ResumableSource Yun S.ByteString)
+getObjectStream bucket name = getObjectRangeStream bucket name Nothing
+
 getObjectRange :: ByteString -> ByteString -> Maybe ByteString -> Yun LByteString
 getObjectRange bucket name mrange = do
     let hds = maybeToList $ ("Range",) . ("bytes="++) <$> mrange
     responseBody <$>
         lbsRequest def{ hPath    = S.concat ["/", bucket, "/", name]
+                      , hHeaders = hds
+                      }
+
+getObjectRangeStream :: ByteString -> ByteString -> Maybe ByteString -> Yun (C.ResumableSource Yun S.ByteString)
+getObjectRangeStream bucket name mrange = do
+    let hds = maybeToList $ ("Range",) . ("bytes="++) <$> mrange
+    responseBody <$>
+        streamRequest def{ hPath    = S.concat ["/", bucket, "/", name]
                       , hHeaders = hds
                       }
 
