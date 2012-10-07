@@ -23,30 +23,6 @@ import Data.Time.Clock (UTCTime(UTCTime))
 import Data.Time.Format (parseTime)
 import System.Locale (defaultTimeLocale)
 
--- parser utils
-
-strRead :: (FromJSON a) => (Text -> Maybe a) -> Value -> Parser a
-strRead conv o = case o of
-    String s ->
-        maybe (fail $ "convert failed:"++T.unpack s)
-              pure
-              (conv s)
-    _        -> parseJSON o
-
-strBool :: Value -> Parser Bool
-strBool = strRead conv
-  where
-    conv "true"  = Just True
-    conv "false" = Just False
-    conv _       = Nothing
-
-pList :: (Value -> Parser a) -> Value -> Parser [a]
-pList p (Array a) = mapM p (V.toList a)
-pList p a         = (:[]) <$> p a
-
-pTime :: String -> UTCTime
-pTime s = fromMaybe (UTCTime (toEnum 0) 0) $ parseTime defaultTimeLocale "%FT%T.000Z" s
-
 data Owner = Owner
   { ownerId     :: !Text
   , ownerName   :: !Text
@@ -106,7 +82,7 @@ data Bucket = Bucket
   , bucketMaxKeys       :: !Int
   , bucketDelimiter     :: !Text
   , bucketIsTruncated   :: !Bool
-  , bucketNextMarker    :: Maybe Text
+  , bucketNextMarker    :: !(Maybe Text)
   , bucketContents      :: ![BucketFile]
   , bucketDirectories   :: ![Text]
   } deriving (Show)
@@ -174,3 +150,28 @@ instance FromJSON CopyResult where
         CopyResult <$> (pTime <$> r .: "LastModified")
                    <*> r .: "ETag"
     parseJSON o = typeMismatch "Object" o
+
+-- parser utils
+
+strRead :: (FromJSON a) => (Text -> Maybe a) -> Value -> Parser a
+strRead conv o = case o of
+    String s ->
+        maybe (fail $ "convert failed:"++T.unpack s)
+              pure
+              (conv s)
+    _        -> parseJSON o
+
+strBool :: Value -> Parser Bool
+strBool = strRead conv
+  where
+    conv "true"  = Just True
+    conv "false" = Just False
+    conv _       = Nothing
+
+pList :: (Value -> Parser a) -> Value -> Parser [a]
+pList p (Array a) = mapM p (V.toList a)
+pList p a         = (:[]) <$> p a
+
+pTime :: String -> UTCTime
+pTime s = fromMaybe (UTCTime (toEnum 0) 0) $ parseTime defaultTimeLocale "%FT%T.000Z" s
+
