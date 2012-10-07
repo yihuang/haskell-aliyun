@@ -95,9 +95,11 @@ askManager  = snd <$> Yun ask
 asksConf :: (YunConf -> a) -> Yun a
 asksConf f  = f <$> askConf
 
+-- | run yun monad with a new http manager.
 runYun :: YunConf -> Yun a -> IO a
 runYun conf yun = withManager $ \man -> runReaderT (unYun yun) (conf, man)
 
+-- | run yun monad with provided http manager.
 runYunWithManager :: Manager -> YunConf -> Yun a -> ResourceT IO a
 runYunWithManager man conf yun = runReaderT (unYun yun) (conf, man)
 
@@ -141,10 +143,12 @@ lbsRequest hints =
 xmlResponse :: (C.MonadThrow m, FromJSON a) => Response LByteString -> m a
 xmlResponse = parseXML . responseBody
 
+-- | list all the buckets.
 listService :: Yun BucketList
 listService =
     xmlResponse =<< lbsRequest def
 
+-- | create or update a bucket.
 putBucket :: ByteString -> Maybe ByteString -> Yun LByteString
 putBucket name macl = do
     let hds = maybeToList $ ("x-oss-acl",) <$> macl
@@ -154,6 +158,7 @@ putBucket name macl = do
                       , hHeaders = hds
                       }
 
+-- | bucket item query conditions.
 data BucketQuery = BucketQuery
   { qryPrefix       :: !ByteString
   , qryMaxKeys      :: !Int
@@ -163,6 +168,7 @@ data BucketQuery = BucketQuery
 instance Default BucketQuery where
     def = BucketQuery "" 1000 Nothing Nothing
 
+-- | query bucket items.
 getBucket :: ByteString -> BucketQuery -> Yun Bucket
 getBucket name qry =
     xmlResponse =<< lbsRequest def{ hPath = "/"++name, hQuery=qs }
@@ -174,6 +180,7 @@ getBucket name qry =
            , maybe "" (("&delimiter="++) . S.singleton) (qryDelimiter qry)
            ]
 
+-- | Generic version of `getBucketContents'.
 getBucketContentsLifted :: Monad m => (forall a. Yun a -> m a) -> ByteString -> ByteString -> C.Source m BucketContent
 getBucketContentsLifted liftYun name prefix = loop def{qryDelimiter=Just '/', qryPrefix=prefix}
   where
@@ -196,13 +203,16 @@ getBucketContentsLifted liftYun name prefix = loop def{qryDelimiter=Just '/', qr
         when (bucketIsTruncated bucket) $
             loop qry{qryMarker=bucketNextMarker bucket}
 
+-- | get bucket items streamlined, support more then 1000 items.
 getBucketContents :: ByteString -> ByteString -> C.Source Yun BucketContent
 getBucketContents = getBucketContentsLifted id
 
+-- | query bucket acl info.
 getBucketACL :: ByteString -> Yun BucketACL
 getBucketACL name =
     xmlResponse =<< lbsRequest def{ hPath = S.concat ["/", name, "?acl"] }
 
+-- | delete bucket by name
 deleteBucket :: ByteString -> Yun LByteString
 deleteBucket name =
     responseBody <$>
@@ -210,6 +220,7 @@ deleteBucket name =
                       , hPath   = "/"++name
                       }
 
+-- | upload a file.
 putObject :: ByteString -> ByteString -> RequestBody Yun -> Yun LByteString
 putObject bucket name body =
     responseBody <$>
@@ -242,12 +253,15 @@ putObjectStream bucket name size source =
 
 -- TODO put object multipart
 
+-- | download a file.
 getObject :: ByteString -> ByteString -> Yun LByteString
 getObject bucket name = getObjectRange bucket name Nothing
 
+-- | download a file streamlined.
 getObjectStream :: ByteString -> ByteString -> Yun (C.ResumableSource Yun S.ByteString)
 getObjectStream bucket name = getObjectRangeStream bucket name Nothing
 
+-- | download a range of file.
 getObjectRange :: ByteString -> ByteString -> Maybe ByteString -> Yun LByteString
 getObjectRange bucket name mrange = do
     let hds = maybeToList $ ("Range",) . ("bytes="++) <$> mrange
@@ -256,6 +270,7 @@ getObjectRange bucket name mrange = do
                       , hHeaders = hds
                       }
 
+-- | download a range of file streamlined.
 getObjectRangeStream :: ByteString -> ByteString -> Maybe ByteString -> Yun (C.ResumableSource Yun S.ByteString)
 getObjectRangeStream bucket name mrange = do
     let hds = maybeToList $ ("Range",) . ("bytes="++) <$> mrange
@@ -264,6 +279,7 @@ getObjectRangeStream bucket name mrange = do
                       , hHeaders = hds
                       }
 
+-- | copy an object.
 copyObject :: ByteString -> ByteString -> ByteString -> Yun CopyResult
 copyObject bucket name source =
     xmlResponse =<<
@@ -272,6 +288,7 @@ copyObject bucket name source =
                       , hHeaders = [("x-oss-copy-source", source)]
                       }
 
+-- | HEAD request get object.
 headObject :: ByteString -> ByteString -> Yun LByteString
 headObject bucket name =
     responseBody <$>
@@ -279,6 +296,7 @@ headObject bucket name =
                       , hPath   = S.concat ["/", bucket, "/", name]
                       }
 
+-- | delete object.
 deleteObject :: ByteString -> ByteString -> Yun LByteString
 deleteObject bucket name =
     responseBody <$>
@@ -286,6 +304,7 @@ deleteObject bucket name =
                       , hPath   = S.concat ["/", bucket, "/", name]
                       }
 
+-- | batch delete multiple objects.
 deleteObjects :: ByteString -> [ByteString] -> Bool -> Yun DeleteResult
 deleteObjects bucket names verbose = do
     let body = L.fromChunks $
